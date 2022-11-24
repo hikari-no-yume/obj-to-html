@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::io::{BufReader, BufRead};
+use std::io::{BufRead, BufReader};
 
 trait ExpectNone {
     fn expect_none(&self, msg: &str);
@@ -109,7 +109,7 @@ fn parse_data(state: &mut ParserState, data_type: &str, args: &str) {
             state.vertices.push(v);
             state.vertex_range_min = state.vertex_range_min.min(v);
             state.vertex_range_max = state.vertex_range_max.max(v);
-        },
+        }
         _ => (),
     }
 }
@@ -154,7 +154,6 @@ fn main() {
     }
 
     let vertex_range = state.vertex_range_max - state.vertex_range_min;
-
 
     let target_dimension = 300.0; // rough pixel width of a cohost post?
     let scale = target_dimension / vertex_range[0].max(vertex_range[1]);
