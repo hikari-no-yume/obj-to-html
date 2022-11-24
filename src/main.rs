@@ -13,9 +13,9 @@ impl<T> ExpectNone for Option<T> {
 }
 
 #[derive(Copy, Clone)]
-struct Vector<const T: usize>([f32; T]);
+struct Vector<const N: usize>([f32; N]);
 
-impl<const T: usize> std::ops::Index<usize> for Vector<T> {
+impl<const N: usize> std::ops::Index<usize> for Vector<N> {
     type Output = f32;
     fn index(&self, index: usize) -> &f32 {
         &self.0[index]
@@ -24,31 +24,31 @@ impl<const T: usize> std::ops::Index<usize> for Vector<T> {
 
 macro_rules! impl_vec_op {
     ($trait:tt, $method:ident, $op:tt) => {
-        impl<const T: usize> std::ops::$trait<Vector<T>> for Vector<T> {
-            type Output = Vector<T>;
-            fn $method(self, rhs: Vector<T>) -> Vector<T> {
-                let mut res = [0f32; T];
-                for i in 0..T {
+        impl<const N: usize> std::ops::$trait<Vector<N>> for Vector<N> {
+            type Output = Vector<N>;
+            fn $method(self, rhs: Vector<N>) -> Vector<N> {
+                let mut res = [0f32; N];
+                for i in 0..N {
                     res[i] = self[i] $op rhs[i];
                 }
                 Vector(res)
             }
         }
-        impl<const T: usize> std::ops::$trait<f32> for Vector<T> {
-            type Output = Vector<T>;
-            fn $method(self, rhs: f32) -> Vector<T> {
-                let mut res = [0f32; T];
-                for i in 0..T {
+        impl<const N: usize> std::ops::$trait<f32> for Vector<N> {
+            type Output = Vector<N>;
+            fn $method(self, rhs: f32) -> Vector<N> {
+                let mut res = [0f32; N];
+                for i in 0..N {
                     res[i] = self[i] $op rhs;
                 }
                 Vector(res)
             }
         }
-        impl<const T: usize> std::ops::$trait<Vector<T>> for f32 {
-            type Output = Vector<T>;
-            fn $method(self, rhs: Vector<T>) -> Vector<T> {
-                let mut res = [0f32; T];
-                for i in 0..T {
+        impl<const N: usize> std::ops::$trait<Vector<N>> for f32 {
+            type Output = Vector<N>;
+            fn $method(self, rhs: Vector<N>) -> Vector<N> {
+                let mut res = [0f32; N];
+                for i in 0..N {
                     res[i] = self $op rhs[i];
                 }
                 Vector(res)
@@ -61,17 +61,31 @@ impl_vec_op!(Sub, sub, -);
 impl_vec_op!(Mul, mul, *);
 impl_vec_op!(Div, div, /);
 
-impl<const T: usize> Vector<T> {
-    fn min(self, rhs: Vector<T>) -> Vector<T> {
-        let mut res = [0f32; T];
-        for i in 0..T {
+impl<const N: usize> Vector<N> {
+    fn parse_from_str(s: &str, separator: char) -> Result<Vector<N>, ()> {
+        let mut res = [0f32; N];
+        let mut split = s.split(separator);
+        for i in 0..N {
+            let component = split.next().ok_or(())?;
+            res[i] = component.parse().map_err(|_| ())?;
+        }
+        if !split.next().is_none() {
+            Err(())?
+        } else {
+            Ok(Vector(res))
+        }
+    }
+
+    fn min(self, rhs: Vector<N>) -> Vector<N> {
+        let mut res = [0f32; N];
+        for i in 0..N {
             res[i] = self[i].min(rhs[i]);
         }
         Vector(res)
     }
-    fn max(self, rhs: Vector<T>) -> Vector<T> {
-        let mut res = [0f32; T];
-        for i in 0..T {
+    fn max(self, rhs: Vector<N>) -> Vector<N> {
+        let mut res = [0f32; N];
+        for i in 0..N {
             res[i] = self[i].max(rhs[i]);
         }
         Vector(res)
@@ -86,20 +100,12 @@ struct ParserState {
     vertex_range_max: Vector<3>,
 }
 
-fn parse_triple(args: &[&str; 3]) -> Result<(f32, f32, f32), ()> {
-    let x = args[0].parse().map_err(|_| ())?;
-    let y = args[1].parse().map_err(|_| ())?;
-    let z = args[2].parse().map_err(|_| ())?;
-    Ok((x, y, z))
-}
-
-fn parse_data(state: &mut ParserState, data_type: &str, args: &[&str]) {
+fn parse_data(state: &mut ParserState, data_type: &str, args: &str) {
     //println!("{}", data_type);
 
     match data_type {
         "v" => {
-            let (x, y, z) = parse_triple(args.try_into().unwrap()).unwrap();
-            let v = Vector::<3>([x, y, z]);
+            let v = Vector::<3>::parse_from_str(args, ' ').unwrap();
             state.vertices.push(v);
             state.vertex_range_min = state.vertex_range_min.min(v);
             state.vertex_range_max = state.vertex_range_max.max(v);
@@ -144,9 +150,7 @@ fn main() {
             continue;
         };
 
-        let args: Vec<&str> = args.split(' ').collect();
-
-        parse_data(&mut state, data_type, &args);
+        parse_data(&mut state, data_type, args);
     }
 
     let vertex_range = state.vertex_range_max - state.vertex_range_min;
