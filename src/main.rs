@@ -395,9 +395,9 @@ fn main() {
             mtl_state.materials[material_name].factor // TODO: sample texture
         } else {
             Vector::<3>([1f32, 1f32, 1f32])
-        };
+        } * 255f32;
 
-        println!("<div style=\"position: absolute; transform-origin: 0 0 0; transform: matrix3d({}); width: 0; height: 0; border-top: {:.5}px rgb({:.5}, {:.5}, {:.5}) solid; border-right: {:.5}px transparent solid;\"></div>", matrix, height, diffuse[0], diffuse[1], diffuse[2], width);
+        println!("<div style=\"position: absolute; transform-origin: 0 0 0; transform: matrix3d({}); width: 0; height: 0; border-top: {:.5}px rgb({:.0}, {:.0}, {:.0}) solid; border-right: {:.5}px transparent solid;\"></div>", matrix, height, diffuse[0], diffuse[1], diffuse[2], width);
     }
 
     println!("</div></div></div>");
