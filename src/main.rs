@@ -328,9 +328,9 @@ fn main() {
     println!("<div style=\"width: {}px; height: {}px; perspective: {}px; background: grey; position: relative; overflow: hidden;\">", target_dimension, target_dimension, vertex_range[2] * scale * 10.0);
 
     // continuously spin around the Y axis
-    print!("<div style=\"transform-style: preserve-3d; transform: rotateX(-90deg);\">");
+    print!("<div style=\"transform-style: preserve-3d; transform: translateZ({:.5}px) rotateX(-90deg);\">", -offset[2]);
     print!("<div style=\"transform-style: preserve-3d; animation: 5s linear infinite spin;\">");
-    println!("<div style=\"transform-style: preserve-3d; transform: rotateX(90deg);\">");
+    println!("<div style=\"transform-style: preserve-3d; transform: rotateX(90deg) translateZ({:5}px);\">", offset[2]);
 
     eprintln!("{} triangles", obj_state.faces.len());
     for face in obj_state.faces {
