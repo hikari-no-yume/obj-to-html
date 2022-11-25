@@ -175,29 +175,18 @@ fn parse_data(state: &mut ParserState, data_type: &str, args: &str) {
     }
 }
 
-fn main() {
-    let obj_path = {
-        let mut args = std::env::args();
-        let _ = args.next().unwrap(); // skip argv[0]
-        let obj_path = args.next().expect("A .obj filename should be specified");
-        args.next().expect_none("There should only be one argument");
-        obj_path
-    };
-
-    let obj_file = File::open(obj_path).expect("Couldn't open file");
-    let obj_file = BufReader::new(obj_file);
-
-    let mut state = ParserState {
-        vertices: Vec::new(),
-        vertex_range_min: Vector::<3>([f32::INFINITY, f32::INFINITY, f32::INFINITY]),
-        vertex_range_max: Vector::<3>([0f32, 0f32, 0f32]),
-        faces: Vec::new(),
-    };
+fn parse_file<P, F>(path: P, mut process_line: F)
+where
+    P: AsRef<std::path::Path>,
+    F: FnMut(&str),
+{
+    let file = File::open(path).expect("Couldn't open file");
+    let file = BufReader::new(file);
 
     // Using .split() rather than .lines() means UTF-8 decoding can be delayed
     // until after detecting comments, which should hopefully avoid problems
     // with files that have non-UTF-8 comments.
-    for line in obj_file.split(b'\n') {
+    for line in file.split(b'\n') {
         let line = line.expect("Couldn't read line from file");
 
         // comment line
@@ -208,12 +197,33 @@ fn main() {
         let line = std::str::from_utf8(&line).expect("Non-comment lines should be UTF-8");
         let line = line.trim_end(); // might end with \r on Windows
 
+        process_line(line);
+    }
+}
+
+fn main() {
+    let obj_path = {
+        let mut args = std::env::args();
+        let _ = args.next().unwrap(); // skip argv[0]
+        let obj_path = args.next().expect("A .obj filename should be specified");
+        args.next().expect_none("There should only be one argument");
+        obj_path
+    };
+
+    let mut state = ParserState {
+        vertices: Vec::new(),
+        vertex_range_min: Vector::<3>([f32::INFINITY, f32::INFINITY, f32::INFINITY]),
+        vertex_range_max: Vector::<3>([0f32, 0f32, 0f32]),
+        faces: Vec::new(),
+    };
+
+    parse_file(obj_path, |line| {
         let Some((data_type, args)) = line.split_once(' ') else {
-            continue;
+            return;
         };
 
         parse_data(&mut state, data_type, args);
-    }
+    });
 
     let vertex_range = state.vertex_range_max - state.vertex_range_min;
 
