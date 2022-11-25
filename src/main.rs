@@ -1,5 +1,7 @@
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
+use std::path::PathBuf;
 
 trait ExpectNone {
     fn expect_none(&self, msg: &str);
@@ -128,19 +130,34 @@ impl Vector<3> {
 
 type Vertex = Vector<3>;
 
-type Face = [Vertex; 3];
+struct Face {
+    vertices: [Vertex; 3],
+    material: Option<usize>, // index into materials array
+}
 
-struct ParserState {
+#[derive(Debug)]
+struct Material {
+    texture_path: Option<PathBuf>,
+    factor: Vector<3>,
+}
+
+struct ObjParserState {
     vertices: Vec<Vertex>,
     vertex_range_min: Vector<3>,
     vertex_range_max: Vector<3>,
+    mtl_path: Option<PathBuf>,
+    materials: Vec<String>,
     faces: Vec<Face>,
 }
 
-fn parse_data(state: &mut ParserState, data_type: &str, args: &str) {
+fn parse_obj_data(state: &mut ObjParserState, data_type: &str, args: &str) {
     //println!("{}", data_type);
 
     match data_type {
+        // material library (name of .mtl filename)
+        "mtllib" => {
+            state.mtl_path = Some(PathBuf::from(args));
+        }
         // vertex, looks like "v 1.0 2.0 3.0"
         "v" => {
             let v = Vector::<3>::parse_from_str(args, ' ').unwrap();
@@ -148,6 +165,8 @@ fn parse_data(state: &mut ParserState, data_type: &str, args: &str) {
             state.vertex_range_min = state.vertex_range_min.min(v);
             state.vertex_range_max = state.vertex_range_max.max(v);
         }
+        // use named material from .mtl file
+        "usemtl" => state.materials.push(String::from(args)),
         // face, looks like "f 1/1/1 2/2/2 3/3/3"
         "f" => {
             let mut vertices: [Vector<3>; 3] = Default::default();
@@ -169,7 +188,52 @@ fn parse_data(state: &mut ParserState, data_type: &str, args: &str) {
             if !vertex_split.next().is_none() {
                 panic!("Should be three vertices in a face")
             }
-            state.faces.push(vertices);
+            let face = Face {
+                vertices,
+                material: state.materials.len().checked_sub(1),
+            };
+            state.faces.push(face);
+        }
+        _ => (),
+    }
+}
+
+struct MtlParserState {
+    materials: HashMap<String, Material>,
+    current_material: Option<String>,
+}
+
+fn parse_mtl_data(state: &mut MtlParserState, data_type: &str, args: &str) {
+    match data_type {
+        // new material
+        "newmtl" => {
+            state.current_material = Some(String::from(args));
+            state.materials.insert(
+                state.current_material.clone().unwrap(),
+                Material {
+                    texture_path: None,
+                    factor: Vector::<3>([1f32, 1f32, 1f32]),
+                },
+            );
+        }
+        // diffuse colour factor, usually looks like "Kd 1 1 1"
+        "Kd" => {
+            assert!(!args.starts_with("spectral")); // unimplemented
+            assert!(!args.starts_with("xyz")); // unimplemented
+            let factor = Vector::<3>::parse_from_str(args, ' ').unwrap();
+            state
+                .materials
+                .get_mut(state.current_material.as_ref().unwrap())
+                .unwrap()
+                .factor = factor;
+        }
+        // texture map for diffuse colour
+        "map_Kd" => {
+            state
+                .materials
+                .get_mut(state.current_material.as_ref().unwrap())
+                .unwrap()
+                .texture_path = Some(PathBuf::from(args));
         }
         _ => (),
     }
@@ -210,29 +274,49 @@ fn main() {
         obj_path
     };
 
-    let mut state = ParserState {
+    let mut obj_state = ObjParserState {
         vertices: Vec::new(),
         vertex_range_min: Vector::<3>([f32::INFINITY, f32::INFINITY, f32::INFINITY]),
         vertex_range_max: Vector::<3>([0f32, 0f32, 0f32]),
+        mtl_path: None,
+        materials: Vec::new(),
         faces: Vec::new(),
     };
 
-    parse_file(obj_path, |line| {
+    parse_file(&obj_path, |line| {
         let Some((data_type, args)) = line.split_once(' ') else {
             return;
         };
 
-        parse_data(&mut state, data_type, args);
+        parse_obj_data(&mut obj_state, data_type, args);
     });
 
-    let vertex_range = state.vertex_range_max - state.vertex_range_min;
+    let mut mtl_state = MtlParserState {
+        materials: HashMap::new(),
+        current_material: None,
+    };
+
+    if let Some(relative_mtl_path) = obj_state.mtl_path {
+        let mut mtl_path = PathBuf::from(obj_path);
+        mtl_path.pop();
+        mtl_path.push(relative_mtl_path);
+        parse_file(mtl_path, |line| {
+            let Some((data_type, args)) = line.split_once(' ') else {
+                return;
+            };
+
+            parse_mtl_data(&mut mtl_state, data_type, args);
+        });
+    };
+
+    let vertex_range = obj_state.vertex_range_max - obj_state.vertex_range_min;
 
     let target_dimension = 300.0; // rough pixel width of a cohost post?
     let scale = target_dimension / vertex_range[0].max(vertex_range[1]);
 
     let center = Vector::<3>([target_dimension / 2.0, target_dimension / 2.0, 0f32]);
 
-    let offset = center - (vertex_range * scale) / 2.0 - state.vertex_range_min * scale;
+    let offset = center - (vertex_range * scale) / 2.0 - obj_state.vertex_range_min * scale;
     // avoid having negative z values, it looks bad with perspective on
     let offset = Vector::<3>([offset[0], offset[1], vertex_range[2] * scale]);
 
@@ -246,8 +330,8 @@ fn main() {
     print!("<div style=\"transform-style: preserve-3d; animation: 5s linear infinite spin;\">");
     println!("<div style=\"transform-style: preserve-3d; transform: rotateX(90deg);\">");
 
-    eprintln!("{} triangles", state.faces.len());
-    for face in state.faces {
+    eprintln!("{} triangles", obj_state.faces.len());
+    for face in obj_state.faces {
         // Let's call the points of the triangle face from the .obj file ABC.
         // The trick with CSS `border` gives us a unit right-angle triangle,
         // let's call its points DEF, where D is the top-left corner.
@@ -259,7 +343,10 @@ fn main() {
         // first two basis vectors in our transformation matrix, and in this way
         // transform DEF into ABC.
 
-        let [a, b, c] = face;
+        let Face {
+            vertices: [a, b, c],
+            material,
+        } = face;
 
         // Used to rotate everything so up is in the correct direction
         let flip_point = Vector::<3>([target_dimension, target_dimension, 0f32]);
@@ -301,7 +388,14 @@ fn main() {
 
         let matrix = matrix.map(|f| format!("{:.5}", f)).join(",");
 
-        println!("<div style=\"position: absolute; transform-origin: 0 0 0; transform: matrix3d({}); width: 0; height: 0; border-top: {:.5}px black solid; border-right: {:.5}px transparent solid;\"></div>", matrix, height, width);
+        let diffuse = if let Some(material_id) = material {
+            let material_name = &obj_state.materials[material_id];
+            mtl_state.materials[material_name].factor // TODO: sample texture
+        } else {
+            Vector::<3>([1f32, 1f32, 1f32])
+        };
+
+        println!("<div style=\"position: absolute; transform-origin: 0 0 0; transform: matrix3d({}); width: 0; height: 0; border-top: {:.5}px rgb({:.5}, {:.5}, {:.5}) solid; border-right: {:.5}px transparent solid;\"></div>", matrix, height, diffuse[0], diffuse[1], diffuse[2], width);
     }
 
     println!("</div></div></div>");
