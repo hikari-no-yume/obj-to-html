@@ -226,6 +226,7 @@ fn main() {
     print!("<div style=\"transform-style: preserve-3d; animation: 5s linear infinite spin;\">");
     println!("<div style=\"transform-style: preserve-3d; transform: rotateX(90deg);\">");
 
+    eprintln!("{} triangles", state.faces.len());
     for face in state.faces {
         // Let's call the points of the triangle face from the .obj file ABC.
         // The trick with CSS `border` gives us a unit right-angle triangle,
