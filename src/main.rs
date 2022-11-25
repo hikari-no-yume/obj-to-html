@@ -231,8 +231,8 @@ fn main() {
         // The trick with CSS `border` gives us a unit right-angle triangle,
         // let's call its points DEF, where D is the top-left corner.
         // We want DEF * some transformation = ABC.
-        // The vector DE is a unit vector pointing left, and the vector DF is
-        // a unit vector pointing right. In other words, the basis vectors!
+        // The vector DE is a unit vector pointing right, and the vector DF is
+        // a unit vector pointing down. In other words, the basis vectors!
         // Conveniently, a transformation matrix consists of basis vectors.
         // If we apply the translation A, we can then use AB and AC as the
         // first two basis vectors in our transformation matrix, and in this way
