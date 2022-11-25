@@ -116,6 +116,16 @@ impl<const N: usize> Vector<N> {
     }
 }
 
+impl Vector<3> {
+    fn cross_product(self, rhs: Vector<3>) -> Vector<3> {
+        Vector([
+            self[1] * rhs[2] - self[2] * rhs[1],
+            self[2] * rhs[0] - self[0] * rhs[2],
+            self[0] * rhs[1] - self[1] * rhs[0],
+        ])
+    }
+}
+
 type Vertex = Vector<3>;
 
 type Face = [Vertex; 3];
@@ -263,11 +273,19 @@ fn main() {
         let (width, x_basis_vector) = x_basis_vector.normalise();
         let (height, y_basis_vector) = y_basis_vector.normalise();
 
+        // Technically we don't need to change the Z basis vector from
+        // (0, 0, 1, 0) if we assume the input Z co-ordinate is always going to
+        // be zero, but in practice we get exciting visual glitches in Chrome
+        // and Firefox if we leave it like that. They're probably trying to
+        // decompose the matrix and getting weird results.
+        // So: set the Z basis vector to the normal.
+        let z_basis_vector = x_basis_vector.cross_product(y_basis_vector);
+
         #[cfg_attr(rustfmt, rustfmt_skip)]
         let matrix: [f32; 16] = [
             x_basis_vector[0], x_basis_vector[1], x_basis_vector[2], 0f32,
             y_basis_vector[0], y_basis_vector[1], y_basis_vector[2], 0f32,
-            0f32, 0f32, 1f32, 0f32,
+            z_basis_vector[0], z_basis_vector[1], z_basis_vector[2], 0f32,
             translation[0], translation[1], translation[2], 1f32,
         ];
 
