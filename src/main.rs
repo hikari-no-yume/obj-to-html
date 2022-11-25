@@ -415,6 +415,25 @@ fn extract_triangle_texture(
     )
 }
 
+// Using this function lets div styles be written readably in the Rust code yet
+// be printed with minimal whitespace in the HTML, to save bytes.
+fn div(styles: &[(&str, &str)]) {
+    print!("<div style=\"");
+    let mut first = true;
+    for (property, value) in styles {
+        if first {
+            first = false;
+        } else {
+            print!(";")
+        }
+        print!("{}:{}", property, value);
+    }
+    print!("\">");
+}
+fn end_div() {
+    print!("</div>");
+}
+
 fn main() {
     let obj_path = {
         let mut args = std::env::args();
@@ -499,12 +518,37 @@ fn main() {
     // spin animation from the cohost CSS (this does a Z-axis rotation)
     println!("<style>@keyframes spin {{to{{transform:rotate(360deg)}}}}</style>");
 
-    println!("<div style=\"width: {}px; height: {}px; perspective: {}px; background: grey; position: relative; overflow: hidden;\">", target_dimension, target_dimension, position_range[2] * scale * 10.0);
+    div(&[
+        ("width", &format!("{}px", target_dimension)),
+        ("height", &format!("{}px", target_dimension)),
+        (
+            "perspective",
+            &format!("{}px", position_range[2] * scale * 10.0),
+        ),
+        ("background", "grey"),
+        ("position", "relative"),
+        ("overflow", "hidden"),
+    ]);
 
     // continuously spin around the Y axis
-    print!("<div style=\"transform-style: preserve-3d; transform: translateZ({:.5}px) rotateX(-90deg);\">", -offset[2]);
-    print!("<div style=\"transform-style: preserve-3d; animation: 5s linear infinite spin;\">");
-    println!("<div style=\"transform-style: preserve-3d; transform: rotateX(90deg) translateZ({:5}px);\">", offset[2]);
+    div(&[
+        ("transform-style", "preserve-3d"),
+        (
+            "transform",
+            &format!("translateZ({:5}px)rotateX(-90deg)", -offset[2]),
+        ),
+    ]);
+    div(&[
+        ("transform-style", "preserve-3d"),
+        ("animation", "5s linear infinite spin"),
+    ]);
+    div(&[
+        ("transform-style", "preserve-3d"),
+        (
+            "transform",
+            &format!("rotateX(90deg)translateZ({:5}px)", offset[2]),
+        ),
+    ]);
 
     eprintln!("{} triangles", obj_state.faces.len());
     for face in obj_state.faces {
@@ -595,15 +639,45 @@ fn main() {
                 texture,
             );
 
-            println!("<div style=\"position: absolute; transform-origin: 0 0 0; transform: matrix3d({}); width: {:.5}px; height: {:.5}px; clip-path: polygon(0% 0%, 100% 0%, 0% 100%); background: url({}); backface-visibility: hidden;\"></div>", matrix, width, height, url);
+            div(&[
+                ("position", "absolute"),
+                ("transform-origin", "0 0 0"),
+                ("transform", &format!("matrix3d({})", matrix)),
+                ("width", &format!("{:.5}px", width)),
+                ("height", &format!("{:.5}px", height)),
+                ("clip-path", "polygon(0%0%,100%0%,0%100%)"),
+                ("background", &format!("url({})", url)),
+                ("backface-visibility", "hidden"),
+            ]);
+            end_div();
         } else {
             let diffuse = diffuse * 255f32;
 
-            println!("<div style=\"position: absolute; transform-origin: 0 0 0; transform: matrix3d({}); width: 0; height: 0; border-top: {:.5}px rgb({:.0}, {:.0}, {:.0}) solid; border-right: {:.5}px transparent solid; backface-visibility: hidden;\"></div>", matrix, height, diffuse[0], diffuse[1], diffuse[2], width);
+            div(&[
+                ("position", "absolute"),
+                ("transform-origin", "0 0 0"),
+                ("transform", &format!("matrix3d({})", matrix)),
+                ("width", "0"),
+                ("height", "0"),
+                (
+                    "border-top",
+                    &format!(
+                        "{:.5}px rgb({:.0},{:.0},{:.0})solid",
+                        height, diffuse[0], diffuse[1], diffuse[2]
+                    ),
+                ),
+                ("border-right", &format!("{:.5}px transparent solid", width)),
+                ("backface-visibility", "hidden"),
+            ]);
+            end_div();
         }
     }
 
-    println!("</div></div></div>");
+    end_div();
+    end_div();
+    end_div();
 
-    println!("</div>");
+    end_div();
+
+    println!();
 }
