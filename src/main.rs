@@ -70,9 +70,9 @@ impl_vec_op!(Mul, mul, *);
 impl_vec_op!(Div, div, /);
 
 impl<const N: usize> Vector<N> {
-    fn parse_from_str(s: &str, separator: char) -> Result<Vector<N>, ()> {
+    fn parse_from_str(s: &str) -> Result<Vector<N>, ()> {
         let mut res = [0f32; N];
-        let mut split = s.split(separator);
+        let mut split = s.split_whitespace();
         for i in 0..N {
             let component = split.next().ok_or(())?;
             res[i] = component.parse().map_err(|_| ())?;
@@ -160,7 +160,7 @@ fn parse_obj_data(state: &mut ObjParserState, data_type: &str, args: &str) {
         }
         // vertex, looks like "v 1.0 2.0 3.0"
         "v" => {
-            let v = Vector::<3>::parse_from_str(args, ' ').unwrap();
+            let v = Vector::<3>::parse_from_str(args).unwrap();
             state.vertices.push(v);
             state.vertex_range_min = state.vertex_range_min.min(v);
             state.vertex_range_max = state.vertex_range_max.max(v);
@@ -170,7 +170,7 @@ fn parse_obj_data(state: &mut ObjParserState, data_type: &str, args: &str) {
         // face, looks like "f 1/1/1 2/2/2 3/3/3"
         "f" => {
             let mut vertices: [Vector<3>; 3] = Default::default();
-            let mut vertex_split = args.split(' ');
+            let mut vertex_split = args.split_whitespace();
             for i in 0..3 {
                 let vertex_data = vertex_split
                     .next()
@@ -220,7 +220,7 @@ fn parse_mtl_data(state: &mut MtlParserState, data_type: &str, args: &str) {
         "Kd" => {
             assert!(!args.starts_with("spectral")); // unimplemented
             assert!(!args.starts_with("xyz")); // unimplemented
-            let factor = Vector::<3>::parse_from_str(args, ' ').unwrap();
+            let factor = Vector::<3>::parse_from_str(args).unwrap();
             state
                 .materials
                 .get_mut(state.current_material.as_ref().unwrap())
@@ -287,6 +287,7 @@ fn main() {
         let Some((data_type, args)) = line.split_once(' ') else {
             return;
         };
+        let args = args.trim_start(); // might have extra whitespace
 
         parse_obj_data(&mut obj_state, data_type, args);
     });
@@ -304,6 +305,7 @@ fn main() {
             let Some((data_type, args)) = line.split_once(' ') else {
                 return;
             };
+            let args = args.trim_start(); // might have extra whitespace
 
             parse_mtl_data(&mut mtl_state, data_type, args);
         });
