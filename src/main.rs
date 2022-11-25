@@ -346,7 +346,7 @@ fn main() {
         // transform DEF into ABC.
 
         let Face {
-            vertices: [a, b, c],
+            vertices: [c, b, a], // reverse order to make facing test correct
             material,
         } = face;
 
@@ -397,7 +397,7 @@ fn main() {
             Vector::<3>([1f32, 1f32, 1f32])
         } * 255f32;
 
-        println!("<div style=\"position: absolute; transform-origin: 0 0 0; transform: matrix3d({}); width: 0; height: 0; border-top: {:.5}px rgb({:.0}, {:.0}, {:.0}) solid; border-right: {:.5}px transparent solid;\"></div>", matrix, height, diffuse[0], diffuse[1], diffuse[2], width);
+        println!("<div style=\"position: absolute; transform-origin: 0 0 0; transform: matrix3d({}); width: 0; height: 0; border-top: {:.5}px rgb({:.0}, {:.0}, {:.0}) solid; border-right: {:.5}px transparent solid; backface-visibility: hidden;\"></div>", matrix, height, diffuse[0], diffuse[1], diffuse[2], width);
     }
 
     println!("</div></div></div>");
