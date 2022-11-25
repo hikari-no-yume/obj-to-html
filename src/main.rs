@@ -1,6 +1,8 @@
+use image::io::Reader;
+use image::{DynamicImage, GenericImageView, ImageOutputFormat, Rgb, RgbImage};
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Cursor};
 use std::path::PathBuf;
 
 trait ExpectNone {
@@ -99,12 +101,16 @@ impl<const N: usize> Vector<N> {
         Vector(res)
     }
 
-    fn normalise(self) -> (f32, Vector<N>) {
+    fn magnitude(self) -> f32 {
         let mut squares = 0f32;
         for i in 0..N {
             squares += self[i] * self[i];
         }
-        let magnitude = squares.sqrt();
+        squares.sqrt()
+    }
+
+    fn normalise(self) -> (f32, Vector<N>) {
+        let magnitude = self.magnitude();
 
         if magnitude == 0f32 {
             (magnitude, self)
@@ -128,7 +134,15 @@ impl Vector<3> {
     }
 }
 
-type Vertex = Vector<3>;
+type Position = Vector<3>;
+type UV = Vector<2>;
+type Colour = Vector<3>;
+
+#[derive(Default)]
+struct Vertex {
+    position: Position,
+    uv: Option<UV>,
+}
 
 struct Face {
     vertices: [Vertex; 3],
@@ -138,13 +152,14 @@ struct Face {
 #[derive(Debug)]
 struct Material {
     texture_path: Option<PathBuf>,
-    factor: Vector<3>,
+    factor: Colour,
 }
 
 struct ObjParserState {
-    vertices: Vec<Vertex>,
-    vertex_range_min: Vector<3>,
-    vertex_range_max: Vector<3>,
+    positions: Vec<Position>,
+    position_range_min: Vector<3>,
+    position_range_max: Vector<3>,
+    uvs: Vec<UV>,
     mtl_path: Option<PathBuf>,
     materials: Vec<String>,
     faces: Vec<Face>,
@@ -158,32 +173,56 @@ fn parse_obj_data(state: &mut ObjParserState, data_type: &str, args: &str) {
         "mtllib" => {
             state.mtl_path = Some(PathBuf::from(args));
         }
-        // vertex, looks like "v 1.0 2.0 3.0"
+        // vertex position, looks like "v 1.0 2.0 3.0"
         "v" => {
             let v = Vector::<3>::parse_from_str(args).unwrap();
-            state.vertices.push(v);
-            state.vertex_range_min = state.vertex_range_min.min(v);
-            state.vertex_range_max = state.vertex_range_max.max(v);
+            state.positions.push(v);
+            state.position_range_min = state.position_range_min.min(v);
+            state.position_range_max = state.position_range_max.max(v);
+        }
+        // vertex texture UVs, looks like "vt 0.25 0.5"
+        "vt" => {
+            if let Ok(uv) = Vector::<2>::parse_from_str(args) {
+                state.uvs.push(uv);
+            } else if let Ok(uv) = Vector::<3>::parse_from_str(args) {
+                assert!(uv[2] == 0f32);
+                state.uvs.push(Vector([uv[0], uv[1]]));
+            } else {
+                panic!()
+            }
         }
         // use named material from .mtl file
         "usemtl" => state.materials.push(String::from(args)),
         // face, looks like "f 1/1/1 2/2/2 3/3/3"
         "f" => {
-            let mut vertices: [Vector<3>; 3] = Default::default();
+            let mut vertices: [Vertex; 3] = Default::default();
             let mut vertex_split = args.split_whitespace();
             for i in 0..3 {
                 let vertex_data = vertex_split
                     .next()
                     .expect("Should be three vertices in a face");
-                let (vertex_id, _normal_id_and_tex_coord_id) = vertex_data.split_once('/').unwrap();
-                let vertex_id: isize = vertex_id.parse().unwrap();
-                let vertex_id: usize = (vertex_id - 1)
+                let (position_id, uv_id_and_normal_id) = vertex_data.split_once('/').unwrap();
+                let position_id: isize = position_id.parse().unwrap();
+                let position_id: usize = (position_id - 1)
                     .try_into()
                     .expect("Negative indices unsupported");
-                vertices[i] = *state
-                    .vertices
-                    .get(vertex_id)
-                    .expect("Vertex ID should be in range");
+                let position = *state
+                    .positions
+                    .get(position_id)
+                    .expect("Position ID should be in range");
+
+                let (uv_id, _normal_id) = uv_id_and_normal_id.split_once('/').unwrap();
+                let uv = if uv_id.len() > 0 {
+                    let uv_id: isize = uv_id.parse().unwrap();
+                    let uv_id: usize = (uv_id - 1)
+                        .try_into()
+                        .expect("Negative indices unsupported");
+                    Some(*state.uvs.get(uv_id).expect("UV ID should be in range"))
+                } else {
+                    None
+                };
+
+                vertices[i] = Vertex { position, uv };
             }
             if !vertex_split.next().is_none() {
                 panic!("Should be three vertices in a face")
@@ -265,6 +304,117 @@ where
     }
 }
 
+fn get_texel(texture: &DynamicImage, coord: (i64, i64)) -> Colour {
+    let x = coord.0.min((texture.width() - 1).into()).max(0) as u32;
+    let y = coord.1.min((texture.height() - 1).into()).max(0) as u32;
+    let pixel = texture.get_pixel(x, y);
+    Vector([
+        pixel[0] as f32 / 255f32,
+        pixel[1] as f32 / 255f32,
+        pixel[2] as f32 / 255f32,
+    ])
+}
+
+fn lerp<const N: usize>(a: Vector<N>, b: Vector<N>, factor: f32) -> Vector<N> {
+    a + (b - a) * factor
+}
+
+fn sample_texture(texture: &DynamicImage, uv: UV) -> Colour {
+    let uv = Vector([
+        if uv[0] >= 0.0 { uv[0] } else { 1.0 + uv[0] },
+        if uv[1] >= 0.0 { uv[1] } else { 1.0 + uv[1] },
+    ]);
+    let uv = Vector([uv[0], 1.0 - uv[1]]);
+
+    let uv = uv * Vector([texture.width() as f32, texture.height() as f32]);
+
+    if false {
+        // TODO: make this toggleable with a command-line flag
+        let left = uv[0].floor() as i64;
+        let right = uv[0].ceil() as i64;
+        let x_factor = uv[0].fract();
+        let top = uv[1].floor() as i64;
+        let bottom = uv[1].ceil() as i64;
+        let y_factor = uv[1].fract();
+
+        let top_left = get_texel(texture, (left, top));
+        let top_right = get_texel(texture, (right, top));
+        let bottom_left = get_texel(texture, (left, bottom));
+        let bottom_right = get_texel(texture, (right, bottom));
+
+        // bilinear interpolation
+        lerp(
+            lerp(top_left, top_right, x_factor),
+            lerp(bottom_left, bottom_right, x_factor),
+            y_factor,
+        )
+    } else {
+        // nearest neighbour
+        get_texel(texture, (uv[0].round() as i64, uv[1].round() as i64))
+    }
+}
+
+fn extract_triangle_texture(
+    uvs: [UV; 3],
+    triangle_size: Vector<2>,
+    multiply_by: Colour,
+    texture: &DynamicImage,
+) -> String {
+    let width = triangle_size[0];
+    let height = triangle_size[1];
+    assert!(width > 0.0);
+    assert!(height > 0.0);
+    let int_width = width.ceil() as u32;
+    let int_height = height.ceil() as u32;
+
+    let mut new_texture = RgbImage::new(int_width, int_height);
+
+    let uv_origin = uvs[0];
+    let uv_x_vector = uvs[1] - uvs[0];
+    let uv_y_vector = uvs[2] - uvs[0];
+
+    let top_left = Vector([0f32, 0f32]);
+    let bottom_right = Vector([1f32, 1f32]);
+
+    let mut last_sample = Vector([0f32, 0f32, 0f32]);
+    for y in 0..int_height {
+        for x in 0..int_width {
+            let point = Vector([x as f32 / width, y as f32 / height]);
+
+            let bottom_right_of_this_point =
+                Vector([(x + 1) as f32 / width, (y + 1) as f32 / height]);
+            let sample = if (bottom_right - bottom_right_of_this_point).magnitude()
+                < (top_left - bottom_right_of_this_point).magnitude()
+            {
+                // This pixel is entirely outside the triangle, so it will be
+                // hidden by the CSS clip path. To avoid wasting space in the
+                // PNG, we can help the compressor out by filling the hidden
+                // area with something similar to the neighbouring data but
+                // internally uniform. The previous real pixel value works well.
+                last_sample
+            } else {
+                let uv = uv_origin + point[0] * uv_x_vector + point[1] * uv_y_vector;
+                let sample = sample_texture(texture, uv) * multiply_by;
+                last_sample = sample;
+                sample
+            };
+            let sample = sample * 255f32;
+            new_texture.put_pixel(
+                x,
+                y,
+                Rgb([sample[0] as u8, sample[1] as u8, sample[2] as u8]),
+            );
+        }
+    }
+
+    let mut png_buffer = Cursor::new(Vec::<u8>::new());
+    new_texture.write_to(&mut png_buffer, ImageOutputFormat::Png);
+    format!(
+        "data:image/png;base64,{}",
+        base64::encode(png_buffer.into_inner())
+    )
+}
+
 fn main() {
     let obj_path = {
         let mut args = std::env::args();
@@ -275,9 +425,10 @@ fn main() {
     };
 
     let mut obj_state = ObjParserState {
-        vertices: Vec::new(),
-        vertex_range_min: Vector::<3>([f32::INFINITY, f32::INFINITY, f32::INFINITY]),
-        vertex_range_max: Vector::<3>([0f32, 0f32, 0f32]),
+        positions: Vec::new(),
+        position_range_min: Vector::<3>([f32::INFINITY, f32::INFINITY, f32::INFINITY]),
+        position_range_max: Vector::<3>([0f32, 0f32, 0f32]),
+        uvs: Vec::new(),
         mtl_path: None,
         materials: Vec::new(),
         faces: Vec::new(),
@@ -297,11 +448,14 @@ fn main() {
         current_material: None,
     };
 
+    let mut textures: HashMap<PathBuf, DynamicImage> = HashMap::new();
+
     if let Some(relative_mtl_path) = obj_state.mtl_path {
         let mut mtl_path = PathBuf::from(obj_path);
         mtl_path.pop();
         mtl_path.push(relative_mtl_path);
-        parse_file(mtl_path, |line| {
+        parse_file(&mtl_path, |line| {
+            let line = line.trim_start();
             let Some((data_type, args)) = line.split_once(' ') else {
                 return;
             };
@@ -309,23 +463,43 @@ fn main() {
 
             parse_mtl_data(&mut mtl_state, data_type, args);
         });
+
+        for material in mtl_state.materials.values() {
+            let Some(ref relative_texture_path) = material.texture_path else {
+                continue;
+            };
+            if textures.contains_key(relative_texture_path) {
+                continue;
+            }
+
+            let mut texture_path = PathBuf::from(&mtl_path);
+            texture_path.pop();
+            texture_path.push(relative_texture_path);
+
+            let image = Reader::open(texture_path)
+                .expect("Couldn't read texture file")
+                .decode()
+                .expect("Couldn't decode texture");
+            eprintln!("{}, {}", image.width(), image.height());
+            textures.insert(relative_texture_path.clone(), image);
+        }
     };
 
-    let vertex_range = obj_state.vertex_range_max - obj_state.vertex_range_min;
+    let position_range = obj_state.position_range_max - obj_state.position_range_min;
 
     let target_dimension = 300.0; // rough pixel width of a cohost post?
-    let scale = target_dimension / vertex_range[0].max(vertex_range[1]);
+    let scale = target_dimension / position_range[0].max(position_range[1]);
 
     let center = Vector::<3>([target_dimension / 2.0, target_dimension / 2.0, 0f32]);
 
-    let offset = center - (vertex_range * scale) / 2.0 - obj_state.vertex_range_min * scale;
+    let offset = center - (position_range * scale) / 2.0 - obj_state.position_range_min * scale;
     // avoid having negative z values, it looks bad with perspective on
-    let offset = Vector::<3>([offset[0], offset[1], vertex_range[2] * scale]);
+    let offset = Vector::<3>([offset[0], offset[1], position_range[2] * scale]);
 
     // spin animation from the cohost CSS (this does a Z-axis rotation)
     println!("<style>@keyframes spin {{to{{transform:rotate(360deg)}}}}</style>");
 
-    println!("<div style=\"width: {}px; height: {}px; perspective: {}px; background: grey; position: relative; overflow: hidden;\">", target_dimension, target_dimension, vertex_range[2] * scale * 10.0);
+    println!("<div style=\"width: {}px; height: {}px; perspective: {}px; background: grey; position: relative; overflow: hidden;\">", target_dimension, target_dimension, position_range[2] * scale * 10.0);
 
     // continuously spin around the Y axis
     print!("<div style=\"transform-style: preserve-3d; transform: translateZ({:.5}px) rotateX(-90deg);\">", -offset[2]);
@@ -335,8 +509,8 @@ fn main() {
     eprintln!("{} triangles", obj_state.faces.len());
     for face in obj_state.faces {
         // Let's call the points of the triangle face from the .obj file ABC.
-        // The trick with CSS `border` gives us a unit right-angle triangle,
-        // let's call its points DEF, where D is the top-left corner.
+        // The CSS trick gives us a unit right-angle triangle, let's call its
+        // points DEF, where D is the top-left corner.
         // We want DEF * some transformation = ABC.
         // The vector DE is a unit vector pointing right, and the vector DF is
         // a unit vector pointing down. In other words, the basis vectors!
@@ -349,6 +523,13 @@ fn main() {
             vertices: [c, b, a], // reverse order to make facing test correct
             material,
         } = face;
+
+        #[rustfmt::skip]
+        let Vertex { position: a, uv: a_uv } = a;
+        #[rustfmt::skip]
+        let Vertex { position: b, uv: b_uv } = b;
+        #[rustfmt::skip]
+        let Vertex { position: c, uv: c_uv } = c;
 
         // Used to rotate everything so up is in the correct direction
         let flip_point = Vector::<3>([target_dimension, target_dimension, 0f32]);
@@ -380,7 +561,7 @@ fn main() {
         // So: set the Z basis vector to the normal.
         let z_basis_vector = x_basis_vector.cross_product(y_basis_vector);
 
-        #[cfg_attr(rustfmt, rustfmt_skip)]
+        #[rustfmt::skip]
         let matrix: [f32; 16] = [
             x_basis_vector[0], x_basis_vector[1], x_basis_vector[2], 0f32,
             y_basis_vector[0], y_basis_vector[1], y_basis_vector[2], 0f32,
@@ -390,14 +571,36 @@ fn main() {
 
         let matrix = matrix.map(|f| format!("{:.5}", f)).join(",");
 
-        let diffuse = if let Some(material_id) = material {
+        let (diffuse, texture) = if let Some(material_id) = material {
             let material_name = &obj_state.materials[material_id];
-            mtl_state.materials[material_name].factor // TODO: sample texture
+            let material = &mtl_state.materials[material_name];
+            let diffuse = material.factor;
+            if !a_uv.is_none() && !b_uv.is_none() && !c_uv.is_none() {
+                let texture = material
+                    .texture_path
+                    .as_ref()
+                    .and_then(|path| textures.get(path));
+                (diffuse, texture)
+            } else {
+                (diffuse, None)
+            }
         } else {
-            Vector::<3>([1f32, 1f32, 1f32])
-        } * 255f32;
+            (Vector::<3>([1f32, 1f32, 1f32]), None)
+        };
+        if let Some(texture) = texture {
+            let url = extract_triangle_texture(
+                [a_uv.unwrap(), b_uv.unwrap(), c_uv.unwrap()],
+                Vector::<2>([width, height]),
+                diffuse,
+                texture,
+            );
 
-        println!("<div style=\"position: absolute; transform-origin: 0 0 0; transform: matrix3d({}); width: 0; height: 0; border-top: {:.5}px rgb({:.0}, {:.0}, {:.0}) solid; border-right: {:.5}px transparent solid; backface-visibility: hidden;\"></div>", matrix, height, diffuse[0], diffuse[1], diffuse[2], width);
+            println!("<div style=\"position: absolute; transform-origin: 0 0 0; transform: matrix3d({}); width: {:.5}px; height: {:.5}px; clip-path: polygon(0% 0%, 100% 0%, 0% 100%); background: url({}); backface-visibility: hidden;\"></div>", matrix, width, height, url);
+        } else {
+            let diffuse = diffuse * 255f32;
+
+            println!("<div style=\"position: absolute; transform-origin: 0 0 0; transform: matrix3d({}); width: 0; height: 0; border-top: {:.5}px rgb({:.0}, {:.0}, {:.0}) solid; border-right: {:.5}px transparent solid; backface-visibility: hidden;\"></div>", matrix, height, diffuse[0], diffuse[1], diffuse[2], width);
+        }
     }
 
     println!("</div></div></div>");
