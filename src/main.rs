@@ -262,7 +262,7 @@ fn main() {
         let (width, x_basis_vector) = x_basis_vector.normalise();
         let (height, y_basis_vector) = y_basis_vector.normalise();
 
-        #[rustfmt_skip]
+        #[cfg_attr(rustfmt, rustfmt_skip)]
         let matrix: [f32; 16] = [
             x_basis_vector[0], x_basis_vector[1], x_basis_vector[2], 0f32,
             y_basis_vector[0], y_basis_vector[1], y_basis_vector[2], 0f32,
