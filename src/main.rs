@@ -421,7 +421,7 @@ fn extract_triangle_texture(
         .write_to(&mut png_buffer, ImageOutputFormat::Png)
         .unwrap();
     format!(
-        "data:image/png;base64,{}",
+        "data:;base64,{}", // full MIME type is optional, this saves space
         base64::encode(png_buffer.into_inner())
     )
 }
