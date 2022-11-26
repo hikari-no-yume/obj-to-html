@@ -529,7 +529,7 @@ fn main() {
         matrix_precision: 5,
         precision: 2,
         background_colour: String::from("grey"),
-        viewport_size: 300f32,
+        viewport_size: 300f32, // narrow phone screen size is 320px
     };
 
     let mut obj_path: Option<PathBuf> = None;
