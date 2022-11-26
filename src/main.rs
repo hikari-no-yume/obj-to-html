@@ -116,6 +116,16 @@ impl<const N: usize> Vector<N> {
         Vector(res)
     }
 
+    fn flush_nan(self) -> Vector<N> {
+        let mut res = [0f32; N];
+        for i in 0..N {
+            if !self[i].is_nan() {
+                res[i] = self[i]
+            }
+        }
+        Vector(res)
+    }
+
     fn magnitude(self) -> f32 {
         let mut squares = 0f32;
         for i in 0..N {
@@ -198,8 +208,10 @@ fn parse_obj_data(state: &mut ObjParserState, data_type: &str, args: &str) {
         // vertex texture UVs, looks like "vt 0.25 0.5"
         "vt" => {
             if let Ok(uv) = Vector::<2>::parse_from_str(args) {
+                let uv = uv.flush_nan(); // yes this occurs in real models :(
                 state.uvs.push(uv);
             } else if let Ok(uv) = Vector::<3>::parse_from_str(args) {
+                let uv = uv.flush_nan();
                 assert!(uv[2] == 0f32);
                 state.uvs.push(Vector([uv[0], uv[1]]));
             } else {
