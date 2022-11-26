@@ -367,7 +367,7 @@ fn colour_to_css(colour: Vector<3>) -> String {
         .max(Vector([0f32, 0f32, 0f32]))
         .min(Vector([255f32, 255f32, 255f32]));
     let hexcode = (colour[0] as u32) << 16 | (colour[1] as u32) << 8 | (colour[2] as u32);
-    format!("#{:6x}", hexcode)
+    format!("#{:06x}", hexcode)
 }
 
 fn extract_triangle_texture(
