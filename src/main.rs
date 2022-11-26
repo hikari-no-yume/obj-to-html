@@ -5,6 +5,15 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Cursor};
 use std::path::PathBuf;
 
+struct Options {
+    bilinear_interpolation: bool,
+    backface_culling: bool,
+    matrix_precision: usize,
+    precision: usize,
+    background_colour: String,
+    viewport_size: f32,
+}
+
 trait ExpectNone {
     fn expect_none(&self, msg: &str);
 }
@@ -319,7 +328,7 @@ fn lerp<const N: usize>(a: Vector<N>, b: Vector<N>, factor: f32) -> Vector<N> {
     a + (b - a) * factor
 }
 
-fn sample_texture(texture: &DynamicImage, uv: UV) -> Colour {
+fn sample_texture(texture: &DynamicImage, uv: UV, bilinear_interpolation: bool) -> Colour {
     let uv = Vector([
         if uv[0] >= 0.0 { uv[0] } else { 1.0 + uv[0] },
         if uv[1] >= 0.0 { uv[1] } else { 1.0 + uv[1] },
@@ -328,8 +337,7 @@ fn sample_texture(texture: &DynamicImage, uv: UV) -> Colour {
 
     let uv = uv * Vector([texture.width() as f32, texture.height() as f32]);
 
-    if false {
-        // TODO: make this toggleable with a command-line flag
+    if bilinear_interpolation {
         let left = uv[0].floor() as i64;
         let right = uv[0].ceil() as i64;
         let x_factor = uv[0].fract();
@@ -359,6 +367,7 @@ fn extract_triangle_texture(
     triangle_size: Vector<2>,
     multiply_by: Colour,
     texture: &DynamicImage,
+    bilinear_interpolation: bool,
 ) -> String {
     let width = triangle_size[0];
     let height = triangle_size[1];
@@ -394,7 +403,7 @@ fn extract_triangle_texture(
                 last_sample
             } else {
                 let uv = uv_origin + point[0] * uv_x_vector + point[1] * uv_y_vector;
-                let sample = sample_texture(texture, uv) * multiply_by;
+                let sample = sample_texture(texture, uv, bilinear_interpolation) * multiply_by;
                 last_sample = sample;
                 sample
             };
@@ -415,12 +424,17 @@ fn extract_triangle_texture(
     )
 }
 
+const SKIP: (&str, &str) = ("", "");
+
 // Using this function lets div styles be written readably in the Rust code yet
 // be printed with minimal whitespace in the HTML, to save bytes.
 fn div(styles: &[(&str, &str)]) {
     print!("<div style=\"");
     let mut first = true;
-    for (property, value) in styles {
+    for pair @ (property, value) in styles {
+        if *pair == SKIP {
+            continue;
+        }
         if first {
             first = false;
         } else {
@@ -434,14 +448,103 @@ fn end_div() {
     print!("</div>");
 }
 
+fn decimal(value: f32, precision: usize) -> String {
+    String::from(
+        format!("{:.*}", precision, value)
+            .trim_end_matches('0')
+            .trim_end_matches('.'),
+    )
+}
+
+const USAGE: &str = "\
+Basic usage:
+
+    obj-to-html something.obj
+
+The HTML is printed to standard output, so you might want to redirect it:
+
+    obj-to-html something.obj > something.html
+
+Options:
+    --help
+        Show this help.
+    --nearest-neighbour
+        Use nearest-neighbour (pixelated) texture sampling rather than bilinear.
+        This affects the generated image data, not a CSS property.
+    --visible-backfaces
+        Don't cull back-facing triangles. This can save space since the CSS
+        property \"backface-visibility:hidden;\" has to be repeated for each
+        triangle.
+    --matrix-precision=DIGITS
+        Use this number of digits after the decimal point when printing the
+        numbers in a transformation matrix. 5 is the default.
+        A smaller number of digits can save space.
+        Matrices are quite sensitive to low precision due to their values being
+        clustered in the range [-1,1].
+    --precision=DIGITS
+        Use this number of digits after the decimal point when printing numbers
+        used for other values, which are generally dimensions (width, height,
+        translation, perspective depth). 2 is the default.
+        A smaller number of digits can save space.
+    --background-colour=COLOR
+        Use this background colour instead of gray. COLOR can be any CSS colour
+        value, for example \"red\" or \"#fa0\".
+    --viewport-size=SIZE
+        Number of pixels to use for the width and height of the viewport.
+        300 is the default.
+        This scaling factor affects not just the CSS, but also the generated
+        image data, so it could dramatically impact the amount of space needed.
+";
+
 fn main() {
-    let obj_path = {
-        let mut args = std::env::args();
-        let _ = args.next().unwrap(); // skip argv[0]
-        let obj_path = args.next().expect("A .obj filename should be specified");
-        args.next().expect_none("There should only be one argument");
-        obj_path
+    let mut options = Options {
+        bilinear_interpolation: true,
+        backface_culling: true,
+        matrix_precision: 5,
+        precision: 2,
+        background_colour: String::from("grey"),
+        viewport_size: 300f32, // rough width/height of a cohost post?
     };
+
+    let mut obj_path: Option<PathBuf> = None;
+    let mut args = std::env::args();
+    args.next(); // skip argv[0]
+    for arg in args {
+        if arg == "--help" {
+            eprint!("obj-to-html v{} by hikari-no-yume (https://github.com/hikari-no-yume/obj-to-html)\n\n{}", env!("CARGO_PKG_VERSION"), USAGE);
+            return;
+        } else if arg == "--nearest-neighbour" {
+            options.bilinear_interpolation = false;
+        } else if arg == "--visible-backfaces" {
+            options.backface_culling = false;
+        } else if let Some(digits) = arg.strip_prefix("--matrix-precision=") {
+            let digits: usize = digits
+                .parse()
+                .expect("Precision value should be a positive integer");
+            options.matrix_precision = digits;
+        } else if let Some(digits) = arg.strip_prefix("--precision=") {
+            let digits: usize = digits
+                .parse()
+                .expect("Precision value should be a positive integer");
+            options.precision = digits;
+        } else if let Some(colour) = arg.strip_prefix("--background-colour=") {
+            options.background_colour = String::from(colour);
+        } else if let Some(size) = arg.strip_prefix("--viewport-size=") {
+            let size: f32 = size
+                .parse()
+                .expect("Viewport size value should be a decimal number");
+            options.viewport_size = size;
+        } else {
+            if arg.starts_with("--") {
+                panic!("Unrecognised argument: {:?} (hint: try --help)", arg);
+            } else if obj_path.is_none() {
+                obj_path = Some(PathBuf::from(arg));
+            } else {
+                panic!("Only one .obj path can be specified at a time");
+            }
+        }
+    }
+    let obj_path = obj_path.expect("A .obj filename should be specified (hint: try --help)");
 
     let mut obj_state = ObjParserState {
         positions: Vec::new(),
@@ -506,7 +609,7 @@ fn main() {
 
     let position_range = obj_state.position_range_max - obj_state.position_range_min;
 
-    let target_dimension = 300.0; // rough pixel width of a cohost post?
+    let target_dimension = options.viewport_size;
     let scale = target_dimension / position_range[0].max(position_range[1]);
 
     let center = Vector::<3>([target_dimension / 2.0, target_dimension / 2.0, 0f32]);
@@ -514,6 +617,9 @@ fn main() {
     let offset = center - (position_range * scale) / 2.0 - obj_state.position_range_min * scale;
     // avoid having negative z values, it looks bad with perspective on
     let offset = Vector::<3>([offset[0], offset[1], position_range[2] * scale]);
+
+    // ensure resulting HTML isn't in quirks mode
+    println!("<!doctype html>");
 
     // spin animation from the cohost CSS (this does a Z-axis rotation)
     println!("<style>@keyframes spin {{to{{transform:rotate(360deg)}}}}</style>");
@@ -525,7 +631,7 @@ fn main() {
             "perspective",
             &format!("{}px", position_range[2] * scale * 10.0),
         ),
-        ("background", "grey"),
+        ("background", &options.background_colour),
         ("position", "relative"),
         ("overflow", "hidden"),
     ]);
@@ -535,7 +641,10 @@ fn main() {
         ("transform-style", "preserve-3d"),
         (
             "transform",
-            &format!("translateZ({:5}px)rotateX(-90deg)", -offset[2]),
+            &format!(
+                "translateZ({}px)rotateX(-90deg)",
+                decimal(-offset[2], options.precision)
+            ),
         ),
     ]);
     div(&[
@@ -546,7 +655,10 @@ fn main() {
         ("transform-style", "preserve-3d"),
         (
             "transform",
-            &format!("rotateX(90deg)translateZ({:5}px)", offset[2]),
+            &format!(
+                "rotateX(90deg)translateZ({}px)",
+                decimal(offset[2], options.precision)
+            ),
         ),
     ]);
 
@@ -613,7 +725,9 @@ fn main() {
             translation[0], translation[1], translation[2], 1f32,
         ];
 
-        let matrix = matrix.map(|f| format!("{:.5}", f)).join(",");
+        let matrix = matrix
+            .map(|f| decimal(f, options.matrix_precision))
+            .join(",");
 
         let (diffuse, texture) = if let Some(material_id) = material {
             let material_name = &obj_state.materials[material_id];
@@ -637,17 +751,25 @@ fn main() {
                 Vector::<2>([width, height]),
                 diffuse,
                 texture,
+                options.bilinear_interpolation,
             );
 
             div(&[
                 ("position", "absolute"),
                 ("transform-origin", "0 0 0"),
                 ("transform", &format!("matrix3d({})", matrix)),
-                ("width", &format!("{:.5}px", width)),
-                ("height", &format!("{:.5}px", height)),
+                ("width", &format!("{}px", decimal(width, options.precision))),
+                (
+                    "height",
+                    &format!("{}px", decimal(height, options.precision)),
+                ),
                 ("clip-path", "polygon(0%0%,100%0%,0%100%)"),
                 ("background", &format!("url({})", url)),
-                ("backface-visibility", "hidden"),
+                if options.backface_culling {
+                    ("backface-visibility", "hidden")
+                } else {
+                    SKIP
+                },
             ]);
             end_div();
         } else {
@@ -662,12 +784,22 @@ fn main() {
                 (
                     "border-top",
                     &format!(
-                        "{:.5}px rgb({:.0},{:.0},{:.0})solid",
-                        height, diffuse[0], diffuse[1], diffuse[2]
+                        "{}px rgb({:.0},{:.0},{:.0})solid",
+                        decimal(height, options.precision),
+                        diffuse[0],
+                        diffuse[1],
+                        diffuse[2]
                     ),
                 ),
-                ("border-right", &format!("{:.5}px transparent solid", width)),
-                ("backface-visibility", "hidden"),
+                (
+                    "border-right",
+                    &format!("{}px transparent solid", decimal(width, options.precision)),
+                ),
+                if options.backface_culling {
+                    ("backface-visibility", "hidden")
+                } else {
+                    SKIP
+                },
             ]);
             end_div();
         }
