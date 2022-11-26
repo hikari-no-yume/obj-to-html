@@ -503,7 +503,7 @@ fn main() {
         matrix_precision: 5,
         precision: 2,
         background_colour: String::from("grey"),
-        viewport_size: 300f32, // rough width/height of a cohost post?
+        viewport_size: 300f32,
     };
 
     let mut obj_path: Option<PathBuf> = None;
