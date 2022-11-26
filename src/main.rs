@@ -567,6 +567,8 @@ fn main() {
         parse_obj_data(&mut obj_state, data_type, args);
     });
 
+    eprintln!("Parsed {} triangles", obj_state.faces.len());
+
     let mut mtl_state = MtlParserState {
         materials: HashMap::new(),
         current_material: None,
@@ -600,11 +602,16 @@ fn main() {
             texture_path.pop();
             texture_path.push(relative_texture_path);
 
-            let image = Reader::open(texture_path)
+            let image = Reader::open(&texture_path)
                 .expect("Couldn't read texture file")
                 .decode()
                 .expect("Couldn't decode texture");
-            eprintln!("{}, {}", image.width(), image.height());
+            eprintln!(
+                "Loaded texture {:?}, {}px by {}px",
+                texture_path,
+                image.width(),
+                image.height()
+            );
             textures.insert(relative_texture_path.clone(), image);
         }
     };
@@ -664,7 +671,6 @@ fn main() {
         ),
     ]);
 
-    eprintln!("{} triangles", obj_state.faces.len());
     for face in obj_state.faces {
         // Let's call the points of the triangle face from the .obj file ABC.
         // The CSS trick gives us a unit right-angle triangle, let's call its
