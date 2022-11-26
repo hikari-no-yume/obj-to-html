@@ -417,7 +417,9 @@ fn extract_triangle_texture(
     }
 
     let mut png_buffer = Cursor::new(Vec::<u8>::new());
-    new_texture.write_to(&mut png_buffer, ImageOutputFormat::Png);
+    new_texture
+        .write_to(&mut png_buffer, ImageOutputFormat::Png)
+        .unwrap();
     format!(
         "data:image/png;base64,{}",
         base64::encode(png_buffer.into_inner())
