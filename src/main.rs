@@ -771,15 +771,20 @@ fn main() {
         } else {
             (Vector::<3>([1f32, 1f32, 1f32]), None)
         };
-        if let Some(texture) = texture {
-            let background = extract_triangle_texture(
+
+        let background = if let Some(texture) = texture {
+            extract_triangle_texture(
                 [a_uv.unwrap(), b_uv.unwrap(), c_uv.unwrap()],
                 Vector::<2>([width, height]),
                 diffuse,
                 texture,
                 options.bilinear_interpolation,
-            );
+            )
+        } else {
+            colour_to_css(diffuse)
+        };
 
+        if background.starts_with("url(") {
             div(&[
                 ("position", "absolute"),
                 ("transform-origin", "0 0 0"),
@@ -799,6 +804,9 @@ fn main() {
             ]);
             end_div();
         } else {
+            assert!(background.starts_with("#"));
+            // The clip-path technique could be used all the time, but using the
+            // old borders trick saves one byte and I am nostalgic for it.
             div(&[
                 ("position", "absolute"),
                 ("transform-origin", "0 0 0"),
@@ -808,14 +816,14 @@ fn main() {
                 (
                     "border-top",
                     &format!(
-                        "{}px {} solid",
+                        "{}px{} solid",
                         decimal(height, options.precision),
-                        colour_to_css(diffuse),
+                        background,
                     ),
                 ),
                 (
                     "border-right",
-                    &format!("{}px transparent solid", decimal(width, options.precision)),
+                    &format!("{}px#00000000 solid", decimal(width, options.precision)),
                 ),
                 if options.backface_culling {
                     ("backface-visibility", "hidden")
