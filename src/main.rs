@@ -756,6 +756,14 @@ fn main() {
         let (width, x_basis_vector) = x_basis_vector.normalise();
         let (height, y_basis_vector) = y_basis_vector.normalise();
 
+        // Hack to reduce the visibility of seams between triangles.
+        // While the top and left edges of the triangle correspond to edges of
+        // a quad and therefore render properly, the other edge is a line
+        // rasterised to a texture, so it's never perfect. Slightly fudging the
+        // size of the triangle means that edge is more likely to overlap with
+        // something else and hide the seam.
+        let (width, height) = (width + 1.0, height + 1.0);
+
         // Technically we don't need to change the Z basis vector from
         // (0, 0, 1, 0) if we assume the input Z co-ordinate is always going to
         // be zero, but in practice we get exciting visual glitches in Chrome
