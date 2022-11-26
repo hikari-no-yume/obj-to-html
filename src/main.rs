@@ -226,7 +226,10 @@ fn parse_obj_data(state: &mut ObjParserState, data_type: &str, args: &str) {
                     .get(position_id)
                     .expect("Position ID should be in range");
 
-                let (uv_id, _normal_id) = uv_id_and_normal_id.split_once('/').unwrap();
+                let uv_id = uv_id_and_normal_id
+                    .split_once('/')
+                    .map(|(uv_id, _normal_id)| uv_id)
+                    .unwrap_or(uv_id_and_normal_id);
                 let uv = if uv_id.len() > 0 {
                     let uv_id: isize = uv_id.parse().unwrap();
                     let uv_id: usize = (uv_id - 1)
