@@ -25,7 +25,7 @@ impl<T> ExpectNone for Option<T> {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 struct Vector<const N: usize>([f32; N]);
 
 impl<const N: usize> Default for Vector<N> {
@@ -362,6 +362,14 @@ fn sample_texture(texture: &DynamicImage, uv: UV, bilinear_interpolation: bool) 
     }
 }
 
+fn colour_to_css(colour: Vector<3>) -> String {
+    let colour = (colour * 255f32)
+        .max(Vector([0f32, 0f32, 0f32]))
+        .min(Vector([255f32, 255f32, 255f32]));
+    let hexcode = (colour[0] as u32) << 16 | (colour[1] as u32) << 8 | (colour[2] as u32);
+    format!("#{:6x}", hexcode)
+}
+
 fn extract_triangle_texture(
     uvs: [UV; 3],
     triangle_size: Vector<2>,
@@ -385,7 +393,8 @@ fn extract_triangle_texture(
     let top_left = Vector([0f32, 0f32]);
     let bottom_right = Vector([1f32, 1f32]);
 
-    let mut last_sample = Vector([0f32, 0f32, 0f32]);
+    let mut last_sample: Option<Vector<3>> = None;
+    let mut all_samples_equal: bool = true;
     for y in 0..int_height {
         for x in 0..int_width {
             let point = Vector([x as f32 / width, y as f32 / height]);
@@ -394,17 +403,22 @@ fn extract_triangle_texture(
                 Vector([(x + 1) as f32 / width, (y + 1) as f32 / height]);
             let sample = if (bottom_right - bottom_right_of_this_point).magnitude()
                 < (top_left - bottom_right_of_this_point).magnitude()
+                && int_width > 2
+                && int_height > 2
             {
                 // This pixel is entirely outside the triangle, so it will be
                 // hidden by the CSS clip path. To avoid wasting space in the
                 // PNG, we can help the compressor out by filling the hidden
                 // area with something similar to the neighbouring data but
                 // internally uniform. The previous real pixel value works well.
-                last_sample
+                last_sample.unwrap()
             } else {
                 let uv = uv_origin + point[0] * uv_x_vector + point[1] * uv_y_vector;
                 let sample = sample_texture(texture, uv, bilinear_interpolation) * multiply_by;
-                last_sample = sample;
+                if last_sample.is_some() && last_sample != Some(sample) {
+                    all_samples_equal = false;
+                }
+                last_sample = Some(sample);
                 sample
             };
             let sample = sample * 255f32;
@@ -416,14 +430,18 @@ fn extract_triangle_texture(
         }
     }
 
-    let mut png_buffer = Cursor::new(Vec::<u8>::new());
-    new_texture
-        .write_to(&mut png_buffer, ImageOutputFormat::Png)
-        .unwrap();
-    format!(
-        "data:;base64,{}", // full MIME type is optional, this saves space
-        base64::encode(png_buffer.into_inner())
-    )
+    if all_samples_equal {
+        colour_to_css(last_sample.unwrap())
+    } else {
+        let mut png_buffer = Cursor::new(Vec::<u8>::new());
+        new_texture
+            .write_to(&mut png_buffer, ImageOutputFormat::Png)
+            .unwrap();
+        format!(
+            "url(data:;base64,{})", // full MIME type is optional, this saves space
+            base64::encode(png_buffer.into_inner())
+        )
+    }
 }
 
 const SKIP: (&str, &str) = ("", "");
@@ -754,7 +772,7 @@ fn main() {
             (Vector::<3>([1f32, 1f32, 1f32]), None)
         };
         if let Some(texture) = texture {
-            let url = extract_triangle_texture(
+            let background = extract_triangle_texture(
                 [a_uv.unwrap(), b_uv.unwrap(), c_uv.unwrap()],
                 Vector::<2>([width, height]),
                 diffuse,
@@ -772,7 +790,7 @@ fn main() {
                     &format!("{}px", decimal(height, options.precision)),
                 ),
                 ("clip-path", "polygon(0%0%,100%0%,0%100%)"),
-                ("background", &format!("url({})", url)),
+                ("background", &background),
                 if options.backface_culling {
                     ("backface-visibility", "hidden")
                 } else {
@@ -781,8 +799,6 @@ fn main() {
             ]);
             end_div();
         } else {
-            let diffuse = diffuse * 255f32;
-
             div(&[
                 ("position", "absolute"),
                 ("transform-origin", "0 0 0"),
@@ -792,11 +808,9 @@ fn main() {
                 (
                     "border-top",
                     &format!(
-                        "{}px rgb({:.0},{:.0},{:.0})solid",
+                        "{}px {} solid",
                         decimal(height, options.precision),
-                        diffuse[0],
-                        diffuse[1],
-                        diffuse[2]
+                        colour_to_css(diffuse),
                     ),
                 ),
                 (
